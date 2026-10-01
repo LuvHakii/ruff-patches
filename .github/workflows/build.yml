@@ -24,7 +24,7 @@ jobs:
           RUFF_REV: ${{ inputs.ruff_rev }}
         run: |
           git clone --depth 1 --branch "$RUFF_REV" https://github.com/astral-sh/ruff
-          git -C ruff apply ../patches/*.patch
+          git -C ruff apply $PWD/patches/*.patch
           wasm-pack build ruff/crates/ruff_wasm --target web --release --out-dir $PWD/out
           echo "{\"ruffRev\":\"$RUFF_REV\",\"ruffCommit\":\"$(git -C ruff rev-parse HEAD)\"}" > out/versions.json
           gh release create "$(date -u +%Y%m%d-%H%M)" out/*.{wasm,js,d.ts} out/versions.json --notes ""
