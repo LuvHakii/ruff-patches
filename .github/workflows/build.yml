@@ -13,16 +13,24 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUFF_REV: ${{ inputs.ruff_rev }}
     steps:
       - uses: actions/checkout@v4
-      - run: curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz | sudo tar xz -C /usr/local/bin --strip-components=1 --wildcards '*/wasm-pack'
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          RUFF_REV: ${{ inputs.ruff_rev }}
-        run: |
-          git clone --depth 1 --branch "$RUFF_REV" https://github.com/astral-sh/ruff
-          git -C ruff apply $PWD/patches/*.patch
-          (cd ruff && rustup target add wasm32-unknown-unknown)
-          wasm-pack build ruff/crates/ruff_wasm --target web --release --out-dir $PWD/out
-          echo "{\"ruffRev\":\"$RUFF_REV\",\"ruffCommit\":\"$(git -C ruff rev-parse HEAD)\"}" > out/versions.json
-          gh release create "$(date -u +%Y%m%d-%H%M)" out/*.{wasm,js,d.ts} out/versions.json --notes ""
+      - name: clone ruff
+        run: git clone --depth 1 --branch "$RUFF_REV" https://github.com/astral-sh/ruff
+      - name: apply patches
+        run: git -C ruff apply $PWD/patches/*.patch
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          rust-src-dir: ruff
+          target: wasm32-unknown-unknown
+      - name: install wasm-pack
+        run: curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz | sudo tar xz -C /usr/local/bin --strip-components=1 --wildcards '*/wasm-pack'
+      - name: build
+        run: wasm-pack build ruff/crates/ruff_wasm --target web --release --out-dir $PWD/out
+      - name: versions
+        run: echo "{\"ruffRev\":\"$RUFF_REV\",\"ruffCommit\":\"$(git -C ruff rev-parse HEAD)\"}" > out/versions.json
+      - name: release
+        run: gh release create "$(date -u +%Y%m%d-%H%M)" out/*.{wasm,js,d.ts} out/versions.json --notes ""
