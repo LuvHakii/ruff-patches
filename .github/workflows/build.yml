@@ -21,7 +21,10 @@ jobs:
       - name: clone ruff
         run: git clone --depth 1 --branch "$RUFF_REV" https://github.com/astral-sh/ruff
       - name: apply patches
-        run: git -C ruff apply $PWD/patches/*.patch
+        run: |
+          out=$(git -C ruff apply -v $PWD/patches/*.patch 2>&1) || { echo "$out"; exit 1; }
+          echo "$out"
+          ! grep -q offset <<<"$out"
       - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           rust-src-dir: ruff
