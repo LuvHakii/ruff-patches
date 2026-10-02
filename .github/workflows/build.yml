@@ -1,6 +1,12 @@
 name: build
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish release <yyyymmdd-hhmm> UTC. Off = dry run, artifact only, 7 days."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -32,5 +38,17 @@ jobs:
           SHA=$(git rev-parse HEAD:ruff)
           TAG=$(git ls-remote --tags https://github.com/astral-sh/ruff.git | grep "^$SHA" | cut -f2 | sed 's|refs/tags/||; s|\^{}$||' | tail -1 || true)
           echo "{\"ruffRev\":\"${TAG:-$SHA}\",\"ruffCommit\":\"$SHA\"}" > out/versions.json
+      - name: upload dry run
+        if: '!inputs.release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-patches-dryrun-${{ github.sha }}
+          path: |
+            out/*.wasm
+            out/*.js
+            out/*.d.ts
+            out/versions.json
+          retention-days: 7
       - name: release
+        if: inputs.release
         run: gh release create "$(date -u +%Y%m%d-%H%M)" out/*.{wasm,js,d.ts} out/versions.json --notes ""
