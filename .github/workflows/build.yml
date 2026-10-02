@@ -1,11 +1,6 @@
 name: build
 
-on:
-  workflow_dispatch:
-    inputs:
-      ruff_rev:
-        description: astral-sh/ruff tag
-        default: 0.16.9
+on: workflow_dispatch
 
 permissions:
   contents: write
@@ -15,11 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      RUFF_REV: ${{ inputs.ruff_rev }}
     steps:
       - uses: actions/checkout@v4
-      - name: clone ruff
-        run: git clone --depth 1 --branch "$RUFF_REV" https://github.com/astral-sh/ruff
+        with:
+          submodules: true
       - name: apply patches
         run: |
           out=$(git -C ruff apply -v $PWD/patches/*.patch 2>&1) || { echo "$out"; exit 1; }
@@ -34,6 +28,9 @@ jobs:
       - name: build
         run: wasm-pack build ruff/crates/ruff_wasm --target web --release --out-dir $PWD/out
       - name: versions
-        run: echo "{\"ruffRev\":\"$RUFF_REV\",\"ruffCommit\":\"$(git -C ruff rev-parse HEAD)\"}" > out/versions.json
+        run: |
+          SHA=$(git rev-parse HEAD:ruff)
+          TAG=$(git ls-remote --tags https://github.com/astral-sh/ruff.git | grep "^$SHA" | cut -f2 | sed 's|refs/tags/||; s|\^{}$||' | tail -1 || true)
+          echo "{\"ruffRev\":\"${TAG:-$SHA}\",\"ruffCommit\":\"$SHA\"}" > out/versions.json
       - name: release
         run: gh release create "$(date -u +%Y%m%d-%H%M)" out/*.{wasm,js,d.ts} out/versions.json --notes ""
