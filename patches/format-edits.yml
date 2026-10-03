@@ -1,0 +1,69 @@
+id: printer-markers
+language: rust
+files: [crates/ruff_formatter/src/printer/mod.rs]
+metadata: { expect: 1 }
+rule:
+  pattern: |
+    {
+        let text = slice.text(self.source_code);
+        $$$BODY
+    }
+  inside: { kind: match_arm, has: { field: pattern, regex: ^FormatElement::SourceCodeSlice } }
+fix: |-
+  {
+      let text = slice.text(self.source_code);
+      let r = ruff_text_size::Ranged::range(slice);
+      self.state.source_markers.push(SourceMarker { source: r.start(), dest: self.state.buffer.text_len() });
+      $$$BODY
+      self.state.source_markers.push(SourceMarker { source: r.end(), dest: self.state.buffer.text_len() });
+  }
+---
+id: wasm-sourcemap-off
+language: rust
+files: [crates/ruff_wasm/src/lib.rs]
+metadata: { expect: 1 }
+rule:
+  pattern: SourceMapGeneration::Enabled
+  inside:
+    kind: function_item
+    stopBy: end
+    has: { field: name, regex: ^format$ }
+    inside: { kind: impl_item, stopBy: end, has: { field: type, regex: ^ParsedModule } }
+fix: SourceMapGeneration::Disabled
+---
+id: wasm-format-edits
+language: rust
+files: [crates/ruff_wasm/src/lib.rs]
+metadata: { expect: 1 }
+rule:
+  kind: function_item
+  pattern: $F
+  has: { field: name, regex: ^format$ }
+  inside: { kind: impl_item, stopBy: end, has: { field: type, regex: ^Workspace$ } }
+fix: |-
+  $F
+
+  #[wasm_bindgen(js_name = formatEdits, unchecked_return_type = "[number, number, string][]")]
+  pub fn format_edits(&self, src: &str) -> Result<JsValue, Error> {
+      let printed = ParsedModule::from_source(src)?.format(&self.settings).map_err(into_error)?.print().map_err(into_error)?;
+      let p: Vec<_> = printed.sourcemap().iter().map(|m| (m.source.to_usize(), m.dest.to_usize())).collect();
+      let (mut tails, mut prev) = (Vec::<usize>::new(), vec![usize::MAX; p.len()]);
+      for i in 0..p.len() {
+          let k = tails.partition_point(|&t| p[t].0 <= p[i].0);
+          if k > 0 { prev[i] = tails[k - 1]; }
+          if k == tails.len() { tails.push(i); } else { tails[k] = i; }
+      }
+      let mut anchors = vec![(src.len(), printed.as_code().len())];
+      let mut i = tails.last().copied().unwrap_or(usize::MAX);
+      while i != usize::MAX { anchors.push(p[i]); i = prev[i]; }
+      let (mut edits, mut sp, mut dp, mut base) = (vec![], 0, 0, 0);
+      for &(a, d) in anchors.iter().rev() {
+          let (old, new) = (&src[sp..a], &printed.as_code()[dp..d]);
+          let mut at = vec![base];
+          for c in old.chars() { at.push(at[at.len() - 1] + c.len_utf16()); }
+          let chars: Vec<_> = new.chars().collect();
+          edits.extend(similar::TextDiff::from_chars(old, new).ops().iter().map(|op| op.as_tag_tuple()).filter(|(t, ..)| *t != similar::DiffTag::Equal).map(|(_, o, n)| (at[o.start], at[o.end], chars[n].iter().collect::<String>())));
+          (sp, dp, base) = (a, d, at[at.len() - 1]);
+      }
+      serde_wasm_bindgen::to_value(&edits).map_err(into_error)
+  }
